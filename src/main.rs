@@ -1,322 +1,123 @@
-use crate::game::{Character, Game, Owner, Player, Position, ENEMY_INDEX, PLAYER_INDEX};
-use animation::AnimationPlugin;
-use battle::BattleActionPlugin;
-use battle::BattlePlugin;
-use battle::BattleUiPlugin;
+use bevy::ecs::archetype::Archetypes;
+use bevy::ecs::component::Components;
+use bevy::ecs::entity::Entities;
 use bevy::prelude::*;
-use game::Field;
-use input::GameInputPlugin;
-use selection::SelectionPlugin;
-use selection_box::{SelectionBoxColor, SelectionBoxPlugin};
-use ui_animation::UiAnimationPlugin;
+use bevy_egui::{egui, EguiContext, EguiPlugin};
+use bevy_inspector_egui::{InspectableRegistry, WorldInspectorPlugin};
+
+use animation::animation::AnimationPlugin;
+use animation::ui_animation::UiAnimationPlugin;
+use game::GamePlugin;
 
 mod animation;
-mod battle;
 mod game;
-mod input;
-mod selection;
-mod selection_box;
-mod ui_animation;
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum AppState {
+    MainMenu,
+    Lobby,
+    Battle,
+    BattleEnd,
+}
 
 fn main() {
     App::build()
         .insert_resource(WindowDescriptor {
-            // title: "Bevy".to_string(),
-            // width: 1024.0,
-            // height: 768.0,
+            title: "Card Game".to_string(),
             ..Default::default()
         })
         .add_plugins(DefaultPlugins)
-        .add_plugin(GameInputPlugin)
-        .add_plugin(SelectionPlugin)
-        .add_plugin(BattlePlugin)
+        // .insert_resource(ClearColor(Color::rgb(0.9, 0.9, 0.9)))
+        // Ui
+        .add_plugin(EguiPlugin)
+        // Inspector
+        .add_plugin(WorldInspectorPlugin::new())
+        .insert_resource(
+            InspectableRegistry::default()
+                .with::<game::components::Ability>()
+                .with::<game::components::AbilityInstance>()
+                .with::<game::components::UnitInstanceRef>()
+                .with::<game::components::CardDataId>()
+                .with::<game::components::UnitDataId>()
+                .with::<game::components::Position>()
+                .with::<game::components::PlayerController>()
+                .with::<game::components::CardName>()
+                .with::<game::components::HpText>()
+                .with::<game::components::ApText>()
+                .with::<game::components::CardSprite>(),
+        )
+        .add_state(AppState::MainMenu)
+        .add_startup_system(game::load_game.system())
+        .add_system_set(SystemSet::on_update(AppState::MainMenu).with_system(main_menu.system()))
+        .add_system_set(SystemSet::on_update(AppState::Lobby).with_system(lobby_menu.system()))
+        .add_system_set(
+            SystemSet::on_enter(AppState::Battle).with_system(game::start_battle.system()),
+        )
+        .add_system_set(
+            SystemSet::on_exit(AppState::Battle).with_system(game::cleanup_battle.system()),
+        )
+        .add_system_set(
+            SystemSet::on_enter(AppState::BattleEnd).with_system(back_to_lobby.system()),
+        )
         .add_plugin(AnimationPlugin)
         .add_plugin(UiAnimationPlugin)
-        .add_startup_system(setup_game.system())
-        .add_startup_system(setup_2d.system())
-        .add_system(update_transform_by_position.system())
-        .add_system(update_character_text.system())
-        // .insert_resource(ClearColor(Color::rgb(0.9, 0.9, 0.9)))
-        .add_plugin(BattleUiPlugin)
-        .add_plugin(BattleActionPlugin)
-        .add_plugin(SelectionBoxPlugin)
+        .add_plugin(GamePlugin)
+        .add_system(inspect.system())
         .run();
 }
-pub struct MainCamera;
-fn setup_2d(mut commands: Commands, mut materials: ResMut<Assets<ColorMaterial>>) {
-    commands
-        .spawn_bundle(OrthographicCameraBundle::new_2d())
-        .insert(MainCamera);
 
-    for player_index in 0..2 {
-        for x in 0..3 {
-            for y in 0..3 {
-                let pos = Position { player_index, x, y };
-                let (x, y, _z) = pos.xyz();
-                let transform = Transform::from_xyz(x, y, 0.0);
-                commands
-                    .spawn_bundle(SpriteBundle {
-                        sprite: Sprite {
-                            size: Vec2::new(90.0, 90.0),
-                            ..Default::default()
-                        },
-                        transform,
-                        material: materials.add(Color::rgb(0.8, 0.0, 0.0).into()),
-                        ..Default::default()
-                    })
-                    .insert(Field)
-                    .insert(pos);
+fn inspect(
+    keyboard: Res<Input<KeyCode>>,
+    all_entities: Query<Entity>,
+    entities: &Entities,
+    archetypes: &Archetypes,
+    components: &Components,
+) {
+    if keyboard.just_pressed(KeyCode::F1) {
+        for entity in all_entities.iter() {
+            println!("Entity: {:?}", entity);
+            if let Some(entity_location) = entities.get(entity) {
+                if let Some(archetype) = archetypes.get(entity_location.archetype_id) {
+                    for component in archetype.components() {
+                        if let Some(info) = components.get_info(component) {
+                            println!("\tComponent: {}", info.name());
+                        }
+                    }
+                }
             }
         }
     }
 }
 
-fn setup_game(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-) {
-    let c = Character {
-        name: "Soldier".to_string(),
-        description: "A soldier".to_string(),
-        hp: 5,
-        attack: 1,
-        defence: 0,
-        action_point: 0,
-        abilities: vec![],
-        status: Default::default(),
-        is_dead: false,
-    };
-    // character 00
-    spawn_character(
-        &mut commands,
-        &asset_server,
-        &mut materials,
-        c.clone(),
-        0,
-        0,
-        PLAYER_INDEX,
-    );
-    // character 01
-    spawn_character(
-        &mut commands,
-        &asset_server,
-        &mut materials,
-        c.clone(),
-        1,
-        0,
-        PLAYER_INDEX,
-    );
-    // character 02
-    spawn_character(
-        &mut commands,
-        &asset_server,
-        &mut materials,
-        c.clone(),
-        2,
-        0,
-        PLAYER_INDEX,
-    );
-    // enemy character 01
-    spawn_character(
-        &mut commands,
-        &asset_server,
-        &mut materials,
-        c.clone(),
-        1,
-        0,
-        ENEMY_INDEX,
-    );
-    // Player
-    let player = spawn_character(
-        &mut commands,
-        &asset_server,
-        &mut materials,
-        Character {
-            name: "You".to_string(),
-            description: "you".to_string(),
-            hp: 5,
-            attack: 1,
-            defence: 0,
-            action_point: 0,
-            abilities: vec![],
-            status: Default::default(),
-            is_dead: false,
-        },
-        1,
-        1,
-        PLAYER_INDEX,
-    );
-    commands.entity(player).insert(Player {
-        index: PLAYER_INDEX,
-        name: "Player".to_string(),
+fn main_menu(egui_context: ResMut<EguiContext>, mut app_state: ResMut<State<AppState>>) {
+    egui::Window::new("Main Menu").show(egui_context.ctx(), |ui| {
+        if ui.button("Start").clicked() {
+            app_state.set(AppState::Lobby).unwrap();
+        }
+        if ui.button("Hello").clicked() {
+            println!("Hello");
+        }
+        if ui.button("Quit").clicked() {
+            std::process::exit(0);
+        }
     });
+}
 
-    let enemy = spawn_character(
-        &mut commands,
-        &asset_server,
-        &mut materials,
-        Character {
-            name: "Demon".to_string(),
-            description: "A demon".to_string(),
-            hp: 5,
-            attack: 1,
-            defence: 0,
-            action_point: 0,
-            abilities: vec![],
-            status: Default::default(),
-            is_dead: false,
-        },
-        1,
-        1,
-        ENEMY_INDEX,
-    );
-    commands.entity(enemy).insert(Player {
-        index: ENEMY_INDEX,
-        name: "Enemy".to_string(),
+fn lobby_menu(egui_context: ResMut<EguiContext>, mut app_state: ResMut<State<AppState>>) {
+    egui::Window::new("Lobby Menu").show(egui_context.ctx(), |ui| {
+        if ui.button("Battle").clicked() {
+            app_state.set(AppState::Battle).unwrap();
+        }
+        if ui.button("Deck").clicked() {
+            println!("Deck");
+        }
+        if ui.button("Back to Main Menu").clicked() {
+            app_state.set(AppState::MainMenu).unwrap();
+        }
     });
-
-    // Game
-    let game = Game {
-        players: vec![player, enemy],
-        current_index: 0,
-    };
-
-    commands.insert_resource(game);
 }
 
-struct CharacterChildren {
-    pub name_entity: Entity,
-    pub hp_entity: Entity,
-    pub sprite_entity: Entity,
-    pub ap_entity: Entity,
-}
-fn spawn_character(
-    commands: &mut Commands,
-    asset_server: &Res<AssetServer>,
-    materials: &mut ResMut<Assets<ColorMaterial>>,
-    character: Character,
-    x: usize,
-    y: usize,
-    player_index: usize,
-) -> Entity {
-    let position = Position { player_index, x, y };
-    let (x, y, z) = position.xyz();
-    let transform = Transform::from_xyz(x, y, 100.0);
-
-    let name_entity = commands
-        .spawn_bundle(Text2dBundle {
-            text: Text::with_section(
-                format!("{}", character.name.clone()),
-                TextStyle {
-                    font: asset_server.load("fonts/FiraSans-Bold.ttf"),
-                    font_size: 30.0,
-                    color: Color::WHITE,
-                },
-                TextAlignment {
-                    vertical: VerticalAlign::Center,
-                    horizontal: HorizontalAlign::Center,
-                },
-            ),
-            transform: Transform::from_xyz(0.0, 0.0, 2.0),
-            ..Default::default()
-        })
-        .id();
-    let hp_entity = commands
-        .spawn_bundle(Text2dBundle {
-            text: Text::with_section(
-                format!("{}", character.hp),
-                TextStyle {
-                    font: asset_server.load("fonts/FiraSans-Bold.ttf"),
-                    font_size: 30.0,
-                    color: Color::GREEN,
-                },
-                TextAlignment {
-                    vertical: VerticalAlign::Bottom,
-                    horizontal: HorizontalAlign::Right,
-                },
-            ),
-            transform: Transform::from_xyz(-45.0, 45.0, 2.0),
-            ..Default::default()
-        })
-        .id();
-    let ap_entity = commands
-        .spawn_bundle(Text2dBundle {
-            text: Text::with_section(
-                format!("{}", character.action_point),
-                TextStyle {
-                    font: asset_server.load("fonts/FiraSans-Bold.ttf"),
-                    font_size: 30.0,
-                    color: Color::GREEN,
-                },
-                TextAlignment {
-                    vertical: VerticalAlign::Bottom,
-                    horizontal: HorizontalAlign::Left,
-                },
-            ),
-            transform: Transform::from_xyz(45.0, 45.0, 2.0),
-            ..Default::default()
-        })
-        .id();
-    let sprite_entity = commands
-        .spawn_bundle(SpriteBundle {
-            sprite: Sprite {
-                size: Vec2::new(90.0, 90.0),
-                resize_mode: SpriteResizeMode::Manual,
-                ..Default::default()
-            },
-            material: materials.add(
-                asset_server
-                    .load("images/Soldier/Soldier1/Walking/1.png")
-                    .into(),
-            ),
-            transform: Transform::from_xyz(0.0, 0.0, 1.0),
-            ..Default::default()
-        })
-        .id();
-    let entity = commands
-        .spawn()
-        .insert(character)
-        .insert(position)
-        .insert(Owner { player_index })
-        .insert(transform)
-        .insert_bundle(SpriteBundle {
-            sprite: Sprite {
-                size: Vec2::new(95.0, 95.0),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .insert(transform)
-        .insert(SelectionBoxColor::None)
-        .insert(CharacterChildren {
-            name_entity,
-            hp_entity,
-            sprite_entity,
-            ap_entity,
-        })
-        .push_children(&[name_entity, hp_entity, sprite_entity, ap_entity])
-        .id();
-    entity
-}
-
-fn update_transform_by_position(mut query: Query<(&Position, &mut Transform), Changed<Position>>) {
-    for (pos, mut tranform) in query.iter_mut() {
-        let (x, y, z) = pos.xyz();
-        tranform.translation.x = x;
-        tranform.translation.y = y;
-        // tranform.translation.z = z;
-    }
-}
-
-fn update_character_text(
-    mut character_query: Query<(&CharacterChildren, &Character), Changed<Character>>,
-    mut text_query: Query<&mut Text>,
-) {
-    for (children, character) in character_query.iter_mut() {
-        let mut text = text_query.get_mut(children.hp_entity).unwrap();
-        text.sections[0].value = character.hp.to_string();
-        let mut text = text_query.get_mut(children.ap_entity).unwrap();
-        text.sections[0].value = character.action_point.to_string();
-    }
+fn back_to_lobby(mut app_state: ResMut<State<AppState>>) {
+    println!("Back to lobby");
+    app_state.set(AppState::Lobby).unwrap();
 }

@@ -1,21 +1,16 @@
 use bevy::prelude::*;
 
 use crate::{
-    input::{HoverChanged, HoveringEntity, SelectedEntity, SelectionChanged},
-    selection_box::SelectionBoxColor,
+    game::systems::HighlightColor,
+    game::{
+        events::{HoverChangedEvent, SelectionChangedEvent},
+        HoveringEntity, SelectedEntity,
+    },
 };
 
-pub struct SelectionPlugin;
-impl Plugin for SelectionPlugin {
-    fn build(&self, app: &mut AppBuilder) {
-        app.add_system(selection_change.system())
-            .add_system(hovering_system.system());
-    }
-}
-
-fn selection_change(
-    mut ev_selection_change: EventReader<SelectionChanged>,
-    mut query: Query<&mut SelectionBoxColor>,
+pub fn selection_change(
+    mut ev_selection_change: EventReader<SelectionChangedEvent>,
+    mut query: Query<&mut HighlightColor>,
     hovering: Res<HoveringEntity>,
     selected: Res<SelectedEntity>,
 ) {
@@ -29,17 +24,17 @@ fn selection_change(
     }
 }
 
-fn hovering_system(
-    mut ev_hover_changed: EventReader<HoverChanged>,
-    mut query: Query<&mut SelectionBoxColor>,
+pub fn hovering_system(
+    mut ev_hover_changed: EventReader<HoverChangedEvent>,
+    mut query: Query<&mut HighlightColor>,
     hovering: Res<HoveringEntity>,
     selected: Res<SelectedEntity>,
 ) {
     for e in ev_hover_changed.iter() {
-        if let Some(entity) = e.0 {
+        if let Some(entity) = e.old {
             update_color(entity, &mut query, &hovering, &selected);
         }
-        if let Some(entity) = e.1 {
+        if let Some(entity) = e.new {
             update_color(entity, &mut query, &hovering, &selected);
         }
     }
@@ -47,19 +42,19 @@ fn hovering_system(
 
 fn update_color(
     entity: Entity,
-    query: &mut Query<&mut SelectionBoxColor>,
+    query: &mut Query<&mut HighlightColor>,
     hovering: &Res<HoveringEntity>,
     selected: &Res<SelectedEntity>,
 ) {
     if let Ok(mut color) = query.get_mut(entity) {
         if hovering.0 == Some(entity) && selected.0 == Some(entity) {
-            *color = SelectionBoxColor::GreenYellow;
+            *color = HighlightColor::GreenYellow;
         } else if hovering.0 == Some(entity) {
-            *color = SelectionBoxColor::Yellow;
+            *color = HighlightColor::Yellow;
         } else if selected.0 == Some(entity) {
-            *color = SelectionBoxColor::Green;
+            *color = HighlightColor::Green;
         } else {
-            *color = SelectionBoxColor::None;
+            *color = HighlightColor::None;
         }
     }
 }

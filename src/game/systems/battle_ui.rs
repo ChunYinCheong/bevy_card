@@ -1,20 +1,10 @@
-use crate::{
-    game::{Character, Position},
-    input::{HoverChanged, PlayerActionEvent},
+use crate::game::{
+    components::{CardInstance, PlayerController, PlayerInstance, Position},
+    events::{HoverChangedEvent, PlayerAction, PlayerActionEvent},
 };
 use bevy::prelude::*;
 
-pub struct BattleUiPlugin;
-impl Plugin for BattleUiPlugin {
-    fn build(&self, app: &mut AppBuilder) {
-        app.add_startup_system(setup_ui.system())
-            .add_system(update_ui_system.system())
-            .init_resource::<ButtonMaterials>()
-            .add_system(button_system.system());
-    }
-}
-
-struct ButtonMaterials {
+pub struct ButtonMaterials {
     normal: Handle<ColorMaterial>,
     hovered: Handle<ColorMaterial>,
     pressed: Handle<ColorMaterial>,
@@ -31,20 +21,28 @@ impl FromWorld for ButtonMaterials {
     }
 }
 
-fn button_system(
+pub fn button_system(
     button_materials: Res<ButtonMaterials>,
     mut interaction_query: Query<
         (&Interaction, &mut Handle<ColorMaterial>),
         (Changed<Interaction>, With<Button>),
     >,
     mut ev_player: EventWriter<PlayerActionEvent>,
+    controller_query: Query<(Entity, &PlayerController)>,
 ) {
     for (interaction, mut material) in interaction_query.iter_mut() {
         match *interaction {
             Interaction::Clicked => {
                 // text.sections[0].value = "Press".to_string();
+                let (player_id, _) = controller_query
+                    .iter()
+                    .find(|(_, &p)| p == PlayerController::Player)
+                    .unwrap();
                 *material = button_materials.pressed.clone();
-                ev_player.send(PlayerActionEvent::EndTurn);
+                ev_player.send(PlayerActionEvent {
+                    player_id: player_id,
+                    action: PlayerAction::EndTurn,
+                });
             }
             Interaction::Hovered => {
                 // text.sections[0].value = "Hover".to_string();
@@ -58,7 +56,7 @@ fn button_system(
     }
 }
 
-fn setup_ui(
+pub fn setup_ui(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut materials: ResMut<Assets<ColorMaterial>>,
@@ -127,33 +125,30 @@ fn setup_ui(
         });
 }
 
-struct DetailUi;
-fn update_ui_system(
-    mut ev_hover_changed: EventReader<HoverChanged>,
+pub struct DetailUi;
+pub fn update_ui_system(
+    mut ev_hover_changed: EventReader<HoverChangedEvent>,
     mut query: Query<(&mut Text, &DetailUi)>,
-    character_query: Query<(Option<&Character>, Option<&Position>)>,
+    card_query: Query<(Option<&CardInstance>, Option<&Position>)>,
 ) {
     let (mut text, _) = query.single_mut().unwrap();
     for e in ev_hover_changed.iter() {
-        match &e.1 {
+        match &e.new {
             Some(e) => {
-                let (character, field) = character_query.get(*e).unwrap();
-                match character {
-                    Some(character) => {
-                        text.sections[0].value = format!(
-                            "{} {} {}",
-                            character.name, character.hp, character.action_point
-                        );
+                let (card, field) = card_query.get(*e).unwrap();
+                match card {
+                    Some(card) => {
+                        text.sections[0].value = format!("{} ({:?}) ", card.name, e);
                     }
                     None => match field {
-                        Some(field) => {
+                        Some(pos) => {
                             text.sections[0].value = format!(
-                                "Field - player_index: {}, x: {}, y: {}",
-                                field.player_index, field.x, field.y
+                                "Cell - player_id: {:?}, x: {}, y: {}",
+                                pos.player_id, pos.x, pos.y
                             )
                         }
                         None => {
-                            error!("No Character or Field");
+                            error!("Not Card or Cell");
                         }
                     },
                 }
